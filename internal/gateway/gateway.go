@@ -6021,7 +6021,7 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request, p provider.
 		// Kimi and OpenAI turn the whole request away for: what a fork
 		// at an earlier turn or a stopped reply leaves (Paidaixinbao on X)
 		body = toolPairsOut(body)
-		if mistral := p.Preset == "mistral" || p.Host() == "api.mistral.ai"; !mistral && (chatReplaysReasoning(buildHost(p), model) || chatReplaysReasoning(buildHost(p), upstream)) {
+		if mistral := isMistral(p); !mistral && (chatReplaysReasoning(buildHost(p), model) || chatReplaysReasoning(buildHost(p), upstream)) {
 			// a tool call the client kept no thinking for, which DeepSeek
 			// turns the whole request away for (#1462)
 			body = withReasoningOnToolTurns(body)
@@ -6041,7 +6041,7 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request, p provider.
 		// calls' ids, go back where Gemini wants them; another upstream
 		// gets the calls' own ids (#687)
 		body = chatCallSignatures(body, compat, p.ID, true)
-		if p.Preset == "mistral" || p.Host() == "api.mistral.ai" {
+		if isMistral(p) {
 			// an earlier turn's reasoning_content, which Mistral turns
 			// away, as the thinking part it takes (#494)
 			body = mistralThinking(body)
@@ -7501,6 +7501,13 @@ func (s *Server) forwardTranslated(ctx context.Context, p provider.Provider, to 
 				body = nb
 			}
 		}
+		if to == provider.Chat && isMistral(p) {
+			// an earlier turn's thinking, which a client's own API had in a
+			// part of its own and the build wrote as reasoning_content,
+			// which Mistral turns away (422 extra_forbidden, located in
+			// the messages) as the thinking part it takes (#494)
+			body = mistralThinking(body)
+		}
 		if to == provider.Chat && (p.IsBedrock() || p.IsAzure()) {
 			body = asCompletionTokens(body)
 		}
@@ -8212,6 +8219,21 @@ var fieldAtPosition = regexp.MustCompile(`\bthe (reasoning_details|reasoning_con
 // badRequest is a status an upstream refuses a request's contents with.
 func badRequest(status int) bool {
 	return status == http.StatusBadRequest || status == http.StatusUnprocessableEntity
+}
+
+// isMistral is a provider whose calls go to Mistral's own API: the mistral
+// preset, a provider the user added by its address, and a plugin in front of
+// it (Mistral Vibe Code's, whose own host is plugin://<id> and whose
+// provider says where it sends). Its chat API reads each message strictly —
+// a field it doesn't know is a 422 extra_forbidden for the whole request —
+// and takes an earlier turn's thinking as a typed part instead (#494).
+func isMistral(p provider.Provider) bool {
+	if p.Preset == "mistral" || p.Host() == "api.mistral.ai" {
+		return true
+	}
+	// a plugin in front of it: Mistral Vibe Code's, whose own host is
+	// plugin://<id> and whose provider says where its calls go
+	return provider.HostOf(p.PluginAPI()) == "api.mistral.ai"
 }
 
 // wrongEndpoint is catalog.WrongEndpoint, whose words a model's test

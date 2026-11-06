@@ -132,10 +132,28 @@ func subscriptionID(id string) bool {
 func (p Provider) IsPlugin() bool { return p.Account != nil && p.Account.plugin != nil }
 
 // PluginForTest is the provider id served by the plugin's provider
-// pluginID, for a test to build a candidate of.
-func PluginForTest(id, pluginID string) Provider {
+// pluginID, for a test to build a candidate of. The plugin's base URL may be
+// given too, as its provider says it (the vendor's own API behind it).
+func PluginForTest(id, pluginID string, api ...string) Provider {
 	pp := plugin.Provider{ID: pluginID}
+	if len(api) > 0 {
+		pp.API = api[0]
+	}
 	return Provider{ID: id, Account: &Account{Agent: "plugin", User: id, plugin: &pp}}
+}
+
+// PluginAPI is the base URL the plugin sends p's requests to, as its provider
+// says it: api.mistral.ai behind Mistral Vibe Code's, token.sensenova.cn
+// behind SenseNova's. "" for a provider that isn't a plugin's.
+func (p Provider) PluginAPI() string {
+	if !p.IsPlugin() {
+		return ""
+	}
+	pp := *p.Account.plugin
+	if cur, ok := PluginOf(p.ID); ok {
+		pp = cur
+	}
+	return pp.API
 }
 
 // PluginProvider is the id OpenCode knows the plugin's provider p is by
